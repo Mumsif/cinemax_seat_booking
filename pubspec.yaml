@@ -1,0 +1,56 @@
+name: cinemax_seat_booking
+description: Multi-theater movie ticket booking system
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  http: ^1.2.0
+  flutter:
+    sdk: flutter
+
+  # ─── FIREBASE (ALL IN ONE) ───
+  firebase_core: ^3.0.0
+  firebase_auth: ^5.0.0
+  cloud_firestore: ^5.0.0
+  firebase_storage: ^12.0.0  # For movie poster images (optional)
+
+  # ─── QR SYSTEM ───
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^3.5.0  # For checker app scanning
+
+  # ─── STATE MANAGEMENT ───
+  flutter_riverpod: ^2.6.0
+
+  # ─── NAVIGATION ───
+  go_router: ^14.6.0
+
+  # ─── UI UTILITIES ───
+  google_fonts: ^6.2.0
+  flutter_screenutil: ^5.9.0
+  intl: ^0.19.0
+  cached_network_image: ^3.4.0
+
+  # ─── PLATFORM ───
+  share_plus: ^10.0.0
+  path_provider: ^2.1.0
+  connectivity_plus: ^6.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/images/logos/
+    - assets/images/onboarding/
+    - assets/images/movies/
+    - assets/images/theaters/
+    - assets/icons/
+    - assets/icons/payment/
+    - assets/animations/
