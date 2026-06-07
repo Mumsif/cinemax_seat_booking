@@ -4,7 +4,22 @@ import 'package:cinemax_seat_booking/presentation/views/ticket_screen.dart';
 import 'package:flutter/material.dart';
 
 class SeatSelectionScreen extends StatefulWidget {
-  const SeatSelectionScreen({super.key});
+  final String movieName;
+  final String cinemaName;
+  final String showTime;
+  final String movieImageUrl;
+  final DateTime selectedDate;
+  final String rating;
+
+  const SeatSelectionScreen({
+    super.key,
+    required this.movieName,
+    required this.cinemaName,
+    required this.showTime,
+    required this.movieImageUrl,
+    required this.selectedDate,
+    required this.rating,
+  });
 
   @override
   State<SeatSelectionScreen> createState() => _SeatSelectionScreenState();
@@ -19,11 +34,15 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     super.initState();
     final random = Random();
     // 10 rows x 20 cols = 200 seats with aisle in middle
-    seats = List.generate(10, (r) => List.generate(20, (c) {
-      if (c == 9 || c == 10) return 0; // aisle gap
-      if (random.nextDouble() < 0.15) return 2; // random reserved (15% chance)
-      return 1; // available
-    }));
+    seats = List.generate(
+      10,
+      (r) => List.generate(20, (c) {
+        if (c == 9 || c == 10) return 0; // aisle gap
+        if (random.nextDouble() < 0.15)
+          return 2; // random reserved (15% chance)
+        return 1; // available
+      }),
+    );
   }
 
   void _tap(int r, int c) {
@@ -55,14 +74,22 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     return selected;
   }
 
-  Color _color(int s) => [Colors.transparent, Color(0xFF6B6565), Color(0xFFD4AF37), Color(0xFFC41E3A)][s];
+  Color _color(int s) => [
+    Colors.transparent,
+    Color(0xFF6B6565),
+    Color(0xFFD4AF37),
+    Color(0xFFC41E3A),
+  ][s];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text("Select Seats You Want to Book", style: TextStyle(color: Colors.white, fontSize: 18)),
+        title: const Text(
+          "Select Seats You Want to Book",
+          style: TextStyle(color: Colors.white, fontSize: 18),
+        ),
         backgroundColor: const Color(0xFF0F0F0F),
         centerTitle: true,
       ),
@@ -72,21 +99,33 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
           width: double.infinity,
           height: 56,
           child: ElevatedButton(
-            onPressed: _hasSelectedSeats ? () {
-              final selectedSeats = _selectedSeatNames;
-              Navigator.push(context, 
-                PageRouteBuilder(pageBuilder: (context, animation, secondaryAnimation) => TicketScreen(selectedSeats: selectedSeats), transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                const begin = Offset(1.0, 0.0);
-                const end = Offset.zero;
-                const curve = Curves.ease;
-                var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                return SlideTransition(position: animation.drive(tween), child: child);
-              }));
-            } : null,
+            onPressed: _hasSelectedSeats
+                ? () {
+                    final selectedSeats = _selectedSeatNames;
+                    print("Selected Seats: $selectedSeats"); // Debugging line
+
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => TicketScreen(
+                          selectedSeats: selectedSeats,
+                          movieName: widget.movieName,
+                          cinemaName: widget.cinemaName,
+                          showTime: widget.showTime,
+                          movieImageUrl: widget.movieImageUrl,
+                          selectedDate: widget.selectedDate,
+                          rating: widget.rating,
+                        ),
+                      ),
+                    );
+                  }
+                : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.seatSelected,
               disabledBackgroundColor: Colors.grey.shade800,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
+              ),
             ),
             child: Text(
               "Book Seats",
@@ -106,7 +145,10 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
             width: 280,
             height: 6,
             margin: const EdgeInsets.symmetric(vertical: 20),
-            decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(3)),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade700,
+              borderRadius: BorderRadius.circular(3),
+            ),
           ),
           Expanded(
             child: InteractiveViewer(
@@ -129,7 +171,9 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
                             if (seats[0][c] == 0) {
                               return Container(
                                 width: 22,
-                                margin: const EdgeInsets.symmetric(horizontal: 3),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 3,
+                                ),
                               );
                             }
                             int seatNum = 0;
@@ -142,46 +186,58 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
                               alignment: Alignment.center,
                               child: Text(
                                 seatNum.toString(),
-                                style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                    // Seat rows with Row labels
-                    ...List.generate(seats.length, (r) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 5),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Row label
-                          SizedBox(
-                            width: 30,
-                            child: Text(
-                              String.fromCharCode(65 + r),
-                              style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          // Seats
-                          ...List.generate(seats[r].length, (c) {
-                            final s = seats[r][c];
-                            return GestureDetector(
-                              onTap: () => _tap(r, c),
-                              child: Container(
-                                width: 22,
-                                height: 22,
-                                margin: const EdgeInsets.symmetric(horizontal: 3),
-                                decoration: BoxDecoration(
-                                  color: _color(s),
-                                  borderRadius: BorderRadius.circular(6),
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             );
                           }),
                         ],
                       ),
-                    )),
+                    ),
+                    ...List.generate(
+                      seats.length,
+                      (r) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Row label
+                            SizedBox(
+                              width: 30,
+                              child: Text(
+                                String.fromCharCode(65 + r),
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            // Seats
+                            ...List.generate(seats[r].length, (c) {
+                              final s = seats[r][c];
+                              return GestureDetector(
+                                onTap: () => _tap(r, c),
+                                child: Container(
+                                  width: 22,
+                                  height: 22,
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _color(s),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -205,9 +261,18 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     );
   }
 
-  Widget _legend(Color c, String t) => Row(children: [
-    Container(width: 16, height: 16, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(4))),
-    const SizedBox(width: 6),
-    Text(t, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-  ]);
+  Widget _legend(Color c, String t) => Row(
+    children: [
+      Container(
+        width: 16,
+        height: 16,
+        decoration: BoxDecoration(
+          color: c,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+      const SizedBox(width: 6),
+      Text(t, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+    ],
+  );
 }

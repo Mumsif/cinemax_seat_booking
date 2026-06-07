@@ -1,8 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:cinemax_seat_booking/presentation/views/seat_selection_screen.dart';
 
+
 class ShowtimeSelection extends StatefulWidget {
-  const ShowtimeSelection({super.key});
+
+  final String movieName;
+  final String cinemaName;
+  final String movieImageUrl;
+  final String rating;
+
+  const ShowtimeSelection({
+    super.key,
+    required this.movieName,
+    required this.cinemaName,
+    required this.movieImageUrl,
+    required this.rating,
+  });
 
   @override
   State<ShowtimeSelection> createState() => _ShowtimeSelectionState();
@@ -139,15 +152,23 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE50914),
+                  disabledBackgroundColor: Colors.grey.shade800,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                onPressed: () {
+                onPressed: _selectedTimeIndex == -1 ? null : () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const SeatSelectionScreen(),
+                      builder: (context) => SeatSelectionScreen(
+                        movieName: widget.movieName,
+                        cinemaName: widget.cinemaName,
+                        movieImageUrl: widget.movieImageUrl,
+                        showTime: _times[_selectedTimeIndex],
+                        selectedDate: DateTime.now().add(Duration(days: _selectedDateIndex)),
+                        rating: widget.rating,
+                      ),
                     ),
                   );
                 },

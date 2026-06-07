@@ -104,7 +104,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => ShowtimeSelection(),
+                              builder: (context) => ShowtimeSelection(
+                                movieName: widget.movie['title'] ?? 'Unknown Movie',
+                                cinemaName: 'Archana Cinema',
+                                movieImageUrl: TmdbService.getImageUrl(widget.movie['poster_path'] ?? widget.movie['backdrop_path']),
+                                rating: widget.movie['vote_average'].toString(),
+                              ),
                             ),
                           );
                         },
@@ -149,7 +154,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => ShowtimeSelection(),
+                              builder: (context) => ShowtimeSelection(
+                                movieName: widget.movie['title'] ?? 'Unknown Movie',
+                                cinemaName: 'GK Cinemax',
+                                movieImageUrl: TmdbService.getImageUrl(widget.movie['poster_path'] ?? widget.movie['backdrop_path']),
+                                rating: widget.movie['vote_average'].toString(),
+                              ),
                             ),
                           );
                         },
