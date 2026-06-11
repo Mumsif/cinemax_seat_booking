@@ -10,16 +10,23 @@ dependencies:
   http: ^1.2.0
   flutter:
     sdk: flutter
+  permission_handler: ^11.3.0
+  pdf: ^3.10.8
+
+  # Authentication Providers
+  google_sign_in: ^6.2.1
+  flutter_facebook_auth: ^6.2.0
 
   # ─── FIREBASE (ALL IN ONE) ───
   firebase_core: ^3.0.0
   firebase_auth: ^5.0.0
   cloud_firestore: ^5.0.0
-  firebase_storage: ^12.0.0  # For movie poster images (optional)
+  firebase_storage: ^12.0.0
 
   # ─── QR SYSTEM ───
   qr_flutter: ^4.1.0
-  mobile_scanner: ^3.5.0  # For checker app scanning
+  mobile_scanner: ^3.5.0
+  shared_preferences: ^2.3.2
 
   # ─── STATE MANAGEMENT ───
   flutter_riverpod: ^2.6.0
@@ -37,6 +44,11 @@ dependencies:
   share_plus: ^10.0.0
   path_provider: ^2.1.0
   connectivity_plus: ^6.1.0
+
+  # ─── NOTIFICATIONS ───
+  flutter_local_notifications: ^17.2.2
+  timezone: ^0.9.4
+  flutter_timezone: ^5.1.0
 
 dev_dependencies:
   flutter_test:

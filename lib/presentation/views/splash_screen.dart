@@ -1,5 +1,5 @@
-import 'package:cinemax_seat_booking/presentation/views/onboarding_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:cinemax_seat_booking/presentation/views/auth_wrapper.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -16,7 +16,7 @@ class _SplashScreenState extends State<SplashScreen> {
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+          MaterialPageRoute(builder: (_) => const AuthWrapper()),
         );
       }
     });
@@ -30,7 +30,6 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            //App Logo
             Container(
               width: 120,
               height: 120,

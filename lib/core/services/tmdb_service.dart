@@ -26,4 +26,20 @@ class TmdbService {
   static String getImageUrl(String posterPath) {
     return '$_imageUrl$posterPath';
   }
+
+  // Add this method
+  static Future<Map<String, dynamic>?> getMovieDetails(int movieId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://api.themoviedb.org/3/movie/$movieId?api_key=$_apiKey'),
+      );
+      
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print('Error fetching movie details: $e');
+    }
+    return null;
+  }
 }

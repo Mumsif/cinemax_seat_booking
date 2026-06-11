@@ -12,7 +12,20 @@
           "package_name": "com.example.cinemax_seat_booking"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "855043742858-lbvhklsrhoo08g37uq0hrlh30prtgarg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.cinemax_seat_booking",
+            "certificate_hash": "31c63ef151f9db46082c80fae48ecc4aa616a88e"
+          }
+        },
+        {
+          "client_id": "855043742858-et3jt042ha25g4q7a4e5ak4pk2k3lopu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBnxDjuF_HVAozCqhA2a5A-WlW9uHE2Hvk"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "855043742858-et3jt042ha25g4q7a4e5ak4pk2k3lopu.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

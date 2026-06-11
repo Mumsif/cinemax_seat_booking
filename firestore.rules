@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuth() && 
+        exists(/databases/$(database)/documents/admin/$(request.auth.uid));
+    }
+    
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // ============================================
+    // TICKETS
+    // - Any authenticated user can create their booking.
+    // - Admins can read the entire collection (used by Daily Report, Booking List, etc.).
+    // - Regular users can only read tickets that belong to them.
+    //   (They primarily use the /users/{uid}/bookings subcollection instead.)
+    // - Update allowed for owner or admin.
+    // - Delete is disabled.
+    // ============================================
+    match /tickets/{ticketId} {
+      allow create: if isAuth();
+      
+      // Admin full access (no resource.data check needed — this allows collection queries)
+      allow read: if isAdmin();
+      
+      // Regular users — only their own documents
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      
+      allow update: if isAuth() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // SEAT BOOKINGS (real-time availability)
+    // - Anyone can read (needed to show which seats are already taken).
+    // - Authenticated users can create/update during the booking flow.
+    // - Only admins can delete.
+    // ============================================
+    match /seatBookings/{seatId} {
+      allow read: if true;
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // USER BOOKINGS (subcollection)
+    // - Strict owner-only access.
+    // - Used by NotificationScreen (history of booking confirmations),
+    //   BookingsScreen, and the home screen badge.
+    // ============================================
+    match /users/{userId}/bookings/{bookingId} {
+      allow create, read, update, delete: if isOwner(userId);
+    }
+    
+    // ============================================
+    // USERS (top-level profile documents)
+    // - Users can only access their own profile.
+    // ============================================
+    match /users/{userId} {
+      allow create, read, update: if isOwner(userId);
+      // delete intentionally disallowed
+    }
+    
+    // ============================================
+    // ADMIN (admin configuration / role documents)
+    // - The isAdmin() helper function does an exists() check.
+    // - Regular users only need to be able to read/check their *own* admin doc (if it exists).
+    // - Full access to the admin collection is restricted to actual admins.
+    // - This prevents regular users from listing all admins or seeing other admins' data (cinemaName, role, email, etc.).
+    // ============================================
+    match /admin/{adminId} {
+      allow read: if isAuth() && (adminId == request.auth.uid || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // ============================================
+    // MOVIES (theater-specific scheduled movies)
+    // - Public read is REQUIRED for the new features:
+    //     • HomeScreen and SearchScreen now query this collection
+    //       to show only movies that are actually scheduled in theaters.
+    //     • MovieDetailScreen queries it to determine which theaters
+    //       are showing a particular movie (and shows "No theaters showing this movie"
+    //       when there are none).
+    // - Only admins can create/update/delete (via the Admin Movie Manager).
+    // ============================================
+    match /movies/{movieId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

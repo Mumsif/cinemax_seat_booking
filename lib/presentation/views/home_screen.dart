@@ -1,10 +1,164 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cinemax_seat_booking/core/services/tmdb_service.dart';
 import 'package:cinemax_seat_booking/presentation/views/movie_detail_screen.dart';
+import 'package:cinemax_seat_booking/presentation/views/notification_screen.dart';
+import 'package:cinemax_seat_booking/presentation/views/theater_movies_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _notificationCount = 0;
+
+  // Available movies loaded from Firestore (admin-curated per theater, deduped) for "Now Playing In Theaters"
+  List<Map<String, dynamic>> _availableMovies = [];
+  bool _isLoadingAvailable = true;
+  String? _availableMoviesError;
+
+  // Trending movies from TMDB API
+  List<dynamic> _trendingMovies = [];
+  bool _isLoadingTrending = true;
+
+  static const List<Map<String, String>> _theaters = [
+    {
+      'name': 'Archana Cinema',
+      'image': 'assets/images/theaters/archana.jfif',
+      'location': 'Akkaraipattu',
+    },
+    {
+      'name': 'GK Cinemax',
+      'image': 'assets/images/theaters/gk.jfif',
+      'location': 'Kalmunai',
+    },
+    {
+      'name': 'PCA Cinemas',
+      'image': 'assets/images/theaters/pca.jfif',
+      'location': 'Kattankudy',
+    },
+    {
+      'name': 'Shanthi Cinema',
+      'image': 'assets/images/theaters/shanthi.jpeg',
+      'location': 'Batticaloa',
+    },
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotificationCount();
+    _loadAvailableMovies();
+    _loadTrendingMovies();
+  }
+
+  Future<void> _loadNotificationCount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _notificationCount = 0);
+      return;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastViewedStr = prefs.getString('last_notification_viewed');
+      final lastViewed = lastViewedStr != null
+          ? DateTime.parse(lastViewedStr)
+          : DateTime.fromMillisecondsSinceEpoch(0);
+
+      // Count only bookings created after last view (unread notifications)
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('bookings')
+          .where('createdAt', isGreaterThan: Timestamp.fromDate(lastViewed))
+          .get();
+      setState(() => _notificationCount = snap.docs.length);
+    } catch (e) {
+      print('Error loading notification count: $e');
+      setState(() => _notificationCount = 0);
+    }
+  }
+
+  Future<void> _loadAvailableMovies() async {
+    setState(() {
+      _isLoadingAvailable = true;
+      _availableMoviesError = null;
+    });
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('movies')
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      final Map<dynamic, Future<Map<String, dynamic>>> enrichFutures = {};
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final mid = data['movieId'];
+        if (mid != null && !enrichFutures.containsKey(mid)) {
+          enrichFutures[mid] = _enrichMovieWithTmdbDetails(data);
+        }
+      }
+
+      final results = await Future.wait(enrichFutures.values);
+      _availableMovies = results;
+    } catch (e) {
+      print('Error loading available movies for Home: $e');
+      _availableMovies = [];
+      _availableMoviesError = e.toString().contains('unavailable')
+          ? 'Could not load movies (connection issue). Tap retry.'
+          : 'Failed to load available movies.';
+    }
+    if (mounted) setState(() => _isLoadingAvailable = false);
+  }
+
+  Future<Map<String, dynamic>> _enrichMovieWithTmdbDetails(Map<String, dynamic> dbData) async {
+    final mid = dbData['movieId'];
+    final movie = {
+      'id': mid,
+      'title': dbData['movieName'] ?? 'Unknown',
+      'poster_path': (dbData['posterUrl'] as String?)?.replaceAll(
+          'https://image.tmdb.org/t/p/w500', ''),
+      'backdrop_path': (dbData['backdropUrl'] as String?)?.replaceAll(
+          'https://image.tmdb.org/t/p/w500', ''),
+      'vote_average': dbData['rating'] ?? 0.0,
+      'overview': '',
+      'duration': dbData['duration'] ?? '',
+      'release_date': dbData['releaseDate'] ?? '',
+      'showTimes': dbData['showTimes'] ?? [],
+    };
+
+    if (mid != null) {
+      try {
+        final movieIdInt = mid is int ? mid : int.tryParse(mid.toString());
+        if (movieIdInt != null) {
+          final details = await TmdbService.getMovieDetails(movieIdInt);
+          if (details != null) {
+            movie['overview'] = details['overview'] ?? '';
+          }
+        }
+      } catch (e) {
+        print('Error fetching TMDB details for movie $mid: $e');
+      }
+    }
+    return movie;
+  }
+
+  Future<void> _loadTrendingMovies() async {
+    setState(() => _isLoadingTrending = true);
+    try {
+      _trendingMovies = await TmdbService.getPopularMovies();
+    } catch (e) {
+      print('Error loading trending movies: $e');
+      _trendingMovies = [];
+    }
+    if (mounted) setState(() => _isLoadingTrending = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,20 +183,55 @@ class HomeScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      "Hello $name!",
+                      'Hello $name!',
                       style: const TextStyle(
                         fontSize: 22,
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(
-                        Icons.notifications,
-                        size: 26,
-                        color: Colors.grey,
-                      ),
+                    Stack(
+                      children: [
+                        IconButton(
+                          onPressed: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const NotificationScreen(),
+                              ),
+                            );
+                            _loadNotificationCount(); // Refresh badge on return
+                          },
+                          icon: const Icon(
+                            Icons.notifications,
+                            size: 26,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        if (_notificationCount > 0)
+                          Positioned(
+                            right: 6,
+                            top: 6,
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFE50914),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  _notificationCount > 9 ? '9+' : '$_notificationCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -62,15 +251,21 @@ class HomeScreen extends StatelessWidget {
                   height: 160,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    itemCount: 4,
+                    itemCount: _theaters.length,
                     itemBuilder: (context, index) {
-                      return _theaterCard(screenWidth);
+                      final theater = _theaters[index];
+                      return _theaterCard(
+                        screenWidth: screenWidth,
+                        imagePath: theater['image']!,
+                        name: theater['name']!,
+                        location: theater['location']!,
+                        context: context,
+                      );
                     },
                   ),
                 ),
 
                 const SizedBox(height: 24),
-
                 const Text(
                   'Trending Movies',
                   style: TextStyle(
@@ -83,41 +278,43 @@ class HomeScreen extends StatelessWidget {
 
                 SizedBox(
                   height: cardHeight + 65,
-                  child: FutureBuilder(
-                    future: TmdbService.getPopularMovies(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-
-                      final movies = snapshot.data!;
-
-                      return ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: movies.length,
-                        itemBuilder: (context, index) {
-                          final movie = movies[index];
-                          return _movieCard(
-                            imageUrl: movie['poster_path'] != null 
-                                ? TmdbService.getImageUrl(movie['poster_path']) 
-                                : '',
-                            title: movie['title'] ?? 'Unknown',
-                            rating: (movie['vote_average'] as num? ?? 0.0).toStringAsFixed(1),
-                            movie: movie,
-                            context: context,
-                            cardWidth: cardWidth,
-                            cardHeight: cardHeight,
-                          );
-                        },
-                      );
-                    },
-                  ),
+                  child: _isLoadingTrending
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: Color(0xFFE50914),
+                          ),
+                        )
+                      : _trendingMovies.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No trending movies available',
+                                style: TextStyle(color: Colors.grey, fontSize: 12),
+                              ),
+                            )
+                          : ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _trendingMovies.length,
+                              itemBuilder: (context, index) {
+                                final movie = _trendingMovies[index];
+                                return _movieCard(
+                                  imageUrl: movie['poster_path'] != null
+                                      ? TmdbService.getImageUrl(movie['poster_path'])
+                                      : '',
+                                  title: movie['title'] ?? 'Unknown',
+                                  rating: (movie['vote_average'] as num? ?? 0.0)
+                                      .toStringAsFixed(1),
+                                  movie: movie,
+                                  context: context,
+                                  cardWidth: cardWidth,
+                                  cardHeight: cardHeight,
+                                );
+                              },
+                            ),
                 ),
 
                 const SizedBox(height: 24),
-
                 const Text(
-                  'Currently Showing',
+                  'Now Playing in Theaters',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -128,36 +325,60 @@ class HomeScreen extends StatelessWidget {
 
                 SizedBox(
                   height: cardHeight + 65,
-                  child: FutureBuilder(
-                    future: TmdbService.getNowPlaying(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-
-                      final movies = snapshot.data!;
-
-                      return ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: movies.length,
-                        itemBuilder: (context, index) {
-                          final movie = movies[index];
-                          return _movieCard(
-                            imageUrl: movie['poster_path'] != null 
-                                ? TmdbService.getImageUrl(movie['poster_path']) 
-                                : '',
-                            title: movie['title'] ?? 'Unknown',
-                            rating: (movie['vote_average'] as num? ?? 0.0).toStringAsFixed(1),
-                            movie: movie,
-                            context: context,
-                            cardWidth: cardWidth,
-                            cardHeight: cardHeight,
-                          );
-                        },
-                      );
-                    },
-                  ),
+                  child: _isLoadingAvailable
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: Color(0xFFE50914),
+                          ),
+                        )
+                      : _availableMoviesError != null
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _availableMoviesError!,
+                                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextButton(
+                                    onPressed: _loadAvailableMovies,
+                                    child: const Text('Retry', style: TextStyle(color: Color(0xFFE50914))),
+                                  ),
+                                ],
+                              ),
+                            )
+                      : _availableMovies.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No movies currently available',
+                                style: TextStyle(color: Colors.grey, fontSize: 12),
+                              ),
+                            )
+                          : ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _availableMovies.length,
+                              itemBuilder: (context, index) {
+                                final movie = _availableMovies[index];
+                                final posterPath = movie['poster_path']?.toString();
+                                final imageUrl = (posterPath != null && posterPath.isNotEmpty)
+                                    ? TmdbService.getImageUrl(posterPath)
+                                    : '';
+                                return _movieCard(
+                                  imageUrl: imageUrl,
+                                  title: movie['title'] ?? 'Unknown',
+                                  rating: (movie['vote_average'] as num? ?? 0.0)
+                                      .toStringAsFixed(1),
+                                  movie: movie,
+                                  context: context,
+                                  cardWidth: cardWidth,
+                                  cardHeight: cardHeight,
+                                );
+                              },
+                            ),
                 ),
+
                 const SizedBox(height: 24),
               ],
             ),
@@ -167,10 +388,24 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _theaterCard(double screenWidth) {
+  Widget _theaterCard({
+    required double screenWidth,
+    required String imagePath,
+    required String name,
+    required String location,
+    required BuildContext context,
+  }) {
     final cardWidth = screenWidth * 0.40;
     return GestureDetector(
-      onTap: () {},
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TheaterMoviesScreen(
+            cinemaName: name,
+            cinemaImage: imagePath,
+          ),
+        ),
+      ),
       child: Container(
         width: cardWidth,
         margin: const EdgeInsets.only(right: 12),
@@ -181,12 +416,18 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              height: 90,
-              decoration: BoxDecoration(
-                color: Colors.grey[800],
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(12),
+            ClipRRect(
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(12)),
+              child: Image.asset(
+                imagePath,
+                height: 90,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  height: 90,
+                  color: Colors.grey[800],
+                  child: const Icon(Icons.error, color: Colors.grey),
                 ),
               ),
             ),
@@ -195,11 +436,31 @@ class HomeScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 12, width: cardWidth * 0.7, color: Colors.grey),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 6),
-                  Container(height: 10, width: cardWidth * 0.5, color: Colors.grey),
-                  const SizedBox(height: 6),
-                  Container(height: 10, width: cardWidth * 0.4, color: Colors.grey),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on,
+                          color: Colors.grey, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                        location,
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -219,12 +480,15 @@ class HomeScreen extends StatelessWidget {
     required double cardHeight,
   }) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => MovieDetailScreen(movie: movie)),
-        );
-      },
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MovieDetailScreen(
+            movie: movie,
+            preselectedCinema: null,
+          ),
+        ),
+      ),
       child: Container(
         width: cardWidth,
         margin: const EdgeInsets.only(right: 12),
@@ -239,16 +503,21 @@ class HomeScreen extends StatelessWidget {
                 height: cardHeight,
                 width: cardWidth,
                 fit: BoxFit.cover,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
+                loadingBuilder: (_, child, progress) {
+                  if (progress == null) return child;
                   return Container(
                     height: cardHeight,
                     width: cardWidth,
                     color: Colors.grey[800],
-                    child: const Center(child: CircularProgressIndicator()),
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFFE50914),
+                        strokeWidth: 2,
+                      ),
+                    ),
                   );
                 },
-                errorBuilder: (context, error, stackTrace) => Container(
+                errorBuilder: (_, __, ___) => Container(
                   height: cardHeight,
                   width: cardWidth,
                   color: Colors.grey[800],
