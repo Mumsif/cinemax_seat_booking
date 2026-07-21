@@ -799,36 +799,56 @@ class _AdminMovieManagerState extends State<AdminMovieManager> {
                   SizedBox(height: 24 * sp),
 
                   // Active Movies
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Now Showing at $_selectedCinema\n(${_activeMovies.length}/2)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18 * sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (_activeMovies.length >= 2)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text(
-                            'MAX REACHED',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Now Showing at $_selectedCinema',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18 * sp,
+                                fontWeight: FontWeight.bold,
+                                height: 1.0,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          if (_activeMovies.length >= 2)
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 8 * sp,
+                                vertical: 4 * sp,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(6 * sp),
+                              ),
+                              child: Text(
+                                'MAX REACHED',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 10 * sp,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      Text(
+                        '(${_activeMovies.length}/2)',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16 * sp,
+                          fontWeight: FontWeight.bold,
+                          height: 1.0,
                         ),
+                      ),
                     ],
                   ),
                   SizedBox(height: 12 * sp),

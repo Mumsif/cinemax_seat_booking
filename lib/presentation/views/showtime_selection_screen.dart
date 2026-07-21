@@ -7,7 +7,7 @@ class ShowtimeSelection extends StatefulWidget {
   final String movieImageUrl;
   final String rating;
   final String? preselectedTime;
-  final List<String>? availableShowTimes; // If provided, only show these slots for the movie/cinema
+  final List<String>? availableShowTimes;
 
   const ShowtimeSelection({
     super.key,
@@ -47,7 +47,12 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
     if (widget.preselectedTime != null) {
       final index = _displayTimes.indexOf(widget.preselectedTime!);
       if (index != -1) {
-        _selectedTimeIndex = index;
+        // Only pre-select if it is not already in the past for today's date (initial date index is 0)
+        final initialDate = DateTime.now().add(Duration(days: _selectedDateIndex));
+        if (!isShowtimePast(widget.preselectedTime!, initialDate)) {
+          _selectedTimeIndex = index;
+        }
+        // else: leave as -1 so a past preselected time does not allow booking a past show
       }
     }
   }
@@ -84,25 +89,48 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
                 scrollDirection: Axis.horizontal,
                 itemCount: 7,
                 itemBuilder: (context, index) {
-                  final date = DateTime.now().add(Duration(days: index));
-                  final isSelected = _selectedDateIndex == index;
+                  final now = DateTime.now();
+                  final date = now.add(Duration(days: index));
+                  // Add check for past dates (requirement 6): even though we generate from today forward,
+                  // explicitly compute and disable any past dates for robustness (e.g. date rollover, clock changes).
+                  final dateOnly = DateTime(date.year, date.month, date.day);
+                  final todayOnly = DateTime(now.year, now.month, now.day);
+                  final isPastDate = dateOnly.isBefore(todayOnly);
+                  final isSelected = _selectedDateIndex == index && !isPastDate;
+
                   return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedDateIndex = index;
-                        // Don't reset time if preselected
-                        if (widget.preselectedTime == null) {
-                          _selectedTimeIndex = -1;
-                        }
-                      });
-                    },
+                    onTap: isPastDate
+                        ? null
+                        : () {
+                            setState(() {
+                              _selectedDateIndex = index;
+                              final newSelDate = DateTime.now().add(Duration(days: index));
+                              // Reset time selection on date change, unless it's a valid preselected
+                              if (widget.preselectedTime == null) {
+                                _selectedTimeIndex = -1;
+                              } else {
+                                // If preselected time is now past for the newly chosen date, clear it
+                                if (isShowtimePast(widget.preselectedTime!, newSelDate)) {
+                                  _selectedTimeIndex = -1;
+                                }
+                              }
+                              // If an existing time selection is now invalid (past) for this date, clear it
+                              if (_selectedTimeIndex != -1 &&
+                                  _selectedTimeIndex < _displayTimes.length) {
+                                final selTime = _displayTimes[_selectedTimeIndex];
+                                if (isShowtimePast(selTime, newSelDate)) {
+                                  _selectedTimeIndex = -1;
+                                }
+                              }
+                            });
+                          },
                     child: Container(
                       width: 48,
                       margin: const EdgeInsets.only(right: 10),
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? const Color(0xFFE50914)
-                            : const Color(0xFF1E1E1E),
+                        color: isPastDate
+                            ? const Color(0xFF2A2A2A)
+                            : (isSelected ? const Color(0xFFE50914) : const Color(0xFF1E1E1E)),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -119,15 +147,17 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
                               'Sun',
                             ][date.weekday - 1],
                             style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.grey,
+                              color: isPastDate
+                                  ? Colors.grey[600]
+                                  : (isSelected ? Colors.white : Colors.grey),
                               fontSize: 11,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             '${date.day}',
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: isPastDate ? Colors.grey[600] : Colors.white,
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                             ),
@@ -187,7 +217,13 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
               ),
               itemCount: _displayTimes.length,
               itemBuilder: (context, index) {
-                return _timeSlot(_displayTimes[index], index);
+                final time = _displayTimes[index];
+                // Compute the currently chosen date for this showtime check.
+                // The date list always uses DateTime.now().add(days: _selectedDateIndex)
+                final selectedDate = DateTime.now().add(Duration(days: _selectedDateIndex));
+                final isPast = isShowtimePast(time, selectedDate);
+                // Pass disabled state to _timeSlot so it can grey out and make non-clickable
+                return _timeSlot(time, index, isDisabled: isPast);
               },
             ),
             const SizedBox(height: 350),
@@ -202,9 +238,20 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
                     borderRadius: BorderRadius.circular(30),
                   ),
                 ),
-                onPressed: _selectedTimeIndex == -1
+                onPressed: (_selectedTimeIndex == -1 || _selectedTimeIndex >= _displayTimes.length)
                     ? null
                     : () {
+                        // Double-check at tap time that the chosen showtime is not past for the selected date.
+                        // This guards against time passing while the screen is open, or preselected invalid times.
+                        final selDate = DateTime.now().add(Duration(days: _selectedDateIndex));
+                        final chosenTime = _displayTimes[_selectedTimeIndex];
+                        if (isShowtimePast(chosenTime, selDate)) {
+                          // Invalid now; force clear and do nothing (UI will reflect on next rebuild)
+                          setState(() {
+                            _selectedTimeIndex = -1;
+                          });
+                          return;
+                        }
                         Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -212,7 +259,7 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
                               movieName: widget.movieName,
                               cinemaName: widget.cinemaName,
                               movieImageUrl: widget.movieImageUrl,
-                              showTime: _displayTimes[_selectedTimeIndex],
+                              showTime: chosenTime,
                               selectedDate: DateTime.now().add(
                                 Duration(days: _selectedDateIndex),
                               ),
@@ -237,30 +284,130 @@ class _ShowtimeSelectionState extends State<ShowtimeSelection> {
     );
   }
 
-  Widget _timeSlot(String time, int index) {
-    final isSelected = _selectedTimeIndex == index;
+  Widget _timeSlot(String time, int index, {bool isDisabled = false}) {
+    // isDisabled comes from isShowtimePast(...) in the grid builder.
+    // When disabled: onTap is null (non-clickable), background and text greyed out.
+    // We also avoid treating it as "selected" visually even if index matches (e.g. stale preselect or time rollover).
+    final isSelected = _selectedTimeIndex == index && !isDisabled;
+
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedTimeIndex = index;
-        });
-      },
+      // onTap null makes the GestureDetector inert (no ripple/selection)
+      onTap: isDisabled
+          ? null
+          : () {
+              setState(() {
+                _selectedTimeIndex = index;
+              });
+            },
       child: Container(
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFE50914) : const Color(0xFF1E1E1E),
+          color: isDisabled
+              ? const Color(0xFF2A2A2A) // greyed-out background for past showtimes
+              : (isSelected ? const Color(0xFFE50914) : const Color(0xFF1E1E1E)),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected
-                ? const Color(0xFFE50914)
-                : Colors.grey.withOpacity(0.3),
+            color: isDisabled
+                ? Colors.grey.withOpacity(0.15)
+                : (isSelected
+                    ? const Color(0xFFE50914)
+                    : Colors.grey.withOpacity(0.3)),
           ),
         ),
         child: Text(
           time,
-          style: const TextStyle(color: Colors.white, fontSize: 13),
+          style: TextStyle(
+            color: isDisabled ? Colors.grey[600] : Colors.white,
+            fontSize: 13,
+          ),
         ),
       ),
     );
+  }
+
+  /// Helper function required by the task:
+  /// bool isShowtimePast(String showtime, DateTime selectedDate)
+  ///
+  /// Determines whether the given showtime string (e.g. "6:00 AM", "06:00 AM", "2:30 PM", "10:30 PM")
+  /// has already passed for the provided selectedDate, using DateTime.now() for "current time".
+  ///
+  /// Requirements implemented:
+  /// 1. Check if selectedDate is "today" using same year/month/day (ignoring time-of-day component).
+  /// 2/3. If today, parse showtime to hour/min and compare its full DateTime against now.
+  ///    Disable (return true) only for strictly earlier times.
+  /// 4. Showtimes at exactly the current time (or later) are valid (return false) — user can still book.
+  /// 5. For future dates (not today and not before), return false (all enabled).
+  /// 6. For past dates (before today), return true (all disabled). We also added explicit date
+  ///    selection checks in the date list builder for robustness.
+  ///
+  /// Parsing is manual to match the existing time format without requiring extra imports at this point.
+  /// Comments explain each step.
+  bool isShowtimePast(String showtime, DateTime selectedDate) {
+    final now = DateTime.now();
+
+    // 1. Determine if the selected date is today (same Y/M/D as current date, per requirements)
+    final isToday = selectedDate.year == now.year &&
+        selectedDate.month == now.month &&
+        selectedDate.day == now.day;
+
+    if (!isToday) {
+      // 6. Past dates check: normalize to date-only and compare
+      final todayOnly = DateTime(now.year, now.month, now.day);
+      final selOnly = DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
+      if (selOnly.isBefore(todayOnly)) {
+        // Any showtime on a past date is past / unbookable
+        return true;
+      }
+      // 5. Future dates: everything enabled
+      return false;
+    }
+
+    // Today logic: parse showtime (as time-of-day) and compare to current wall time
+    try {
+      // Handle existing formats robustly: "6:00 AM", "06:00 AM", "10:30 PM", "2:30 PM" etc.
+      final parts = showtime.trim().split(RegExp(r'\s+'));
+      if (parts.length != 2) return false;
+
+      final timePart = parts[0];
+      String ampm = parts[1].toUpperCase();
+
+      final timeNums = timePart.split(':');
+      if (timeNums.length != 2) return false;
+
+      int hour = int.tryParse(timeNums[0]) ?? -1;
+      final minute = int.tryParse(timeNums[1]) ?? -1;
+
+      if (hour == -1 || minute == -1 || minute < 0 || minute > 59) return false;
+
+      // Convert 12h + AM/PM to 24h
+      if (ampm == 'PM' && hour != 12) {
+        hour += 12;
+      } else if (ampm == 'AM' && hour == 12) {
+        hour = 0;
+      }
+      if (hour < 0 || hour > 23) return false;
+
+      // Construct a DateTime representing the showtime *on the selected date's day*
+      // (we take Y/M/D from selectedDate but override with the parsed time; this ignores any
+      // time-of-day that may be present in the selectedDate object from DateTime.now().add(...))
+      final showDateTime = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        hour,
+        minute,
+      );
+
+      // Truncate "now" to the minute for fair comparison (per req 4: exactly at the current time is valid).
+      // This way, a showtime "3:51 PM" remains bookable for the entire 3:51 minute, even if now has seconds.
+      // Only when the minute advances past the showtime's minute do we disable.
+      final nowAtMinute = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+      // 3/4. isBefore (on minute resolution) means the showtime's minute has already passed today -> disable.
+      // Equal minute or later minutes: allowed (user can rush).
+      return showDateTime.isBefore(nowAtMinute);
+    } catch (_) {
+      // Fail-safe: if we can't parse, do not disable the slot
+      return false;
+    }
   }
 }

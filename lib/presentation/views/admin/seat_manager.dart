@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cinemax_seat_booking/core/services/admin_service.dart';
+import 'package:cinemax_seat_booking/presentation/widgets/animated_seat_widget.dart';
+import 'package:cinemax_seat_booking/presentation/widgets/cinema_screen_painter.dart';
 
 class AdminSeatManagement extends StatefulWidget {
   final String? restrictedCinema; 
@@ -11,7 +14,8 @@ class AdminSeatManagement extends StatefulWidget {
   State<AdminSeatManagement> createState() => _AdminSeatManagementState();
 }
 
-class _AdminSeatManagementState extends State<AdminSeatManagement> {
+class _AdminSeatManagementState extends State<AdminSeatManagement>
+    with TickerProviderStateMixin {
   late String _selectedCinema;
   String _selectedShowTime = '06:30 PM';
   DateTime _selectedDate = DateTime.now();
@@ -19,6 +23,12 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
   List<List<int>> _seats = [];
   Map<String, dynamic> _seatBookings = {};
   bool _isLoading = true;
+
+  // Animation controllers
+  late AnimationController _screenGlowController;
+  late Animation<double> _screenGlowAnim;
+  late AnimationController _legendController;
+  late Animation<double> _legendFadeAnim;
 
   final List<String> _allCinemas = [
     'Archana Cinema',
@@ -29,27 +39,23 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
 
   /// Determine if cinema admin using AdminService (more reliable than widget parameter)
   bool get _isCinemaAdmin {
-    // First check widget parameter
     if (widget.restrictedCinema != null && 
         widget.restrictedCinema!.isNotEmpty && 
         widget.restrictedCinema != 'null' && 
         widget.restrictedCinema!.trim().isNotEmpty) {
       return true;
     }
-    // Fallback to AdminService cache
     return AdminService.isCinemaAdmin;
   }
 
   /// Get the cinema name for this admin
   String? get _cinemaName {
-    // Priority 1: widget parameter
     if (widget.restrictedCinema != null && 
         widget.restrictedCinema!.isNotEmpty && 
         widget.restrictedCinema != 'null' && 
         widget.restrictedCinema!.trim().isNotEmpty) {
       return widget.restrictedCinema;
     }
-    // Priority 2: AdminService cache
     if (AdminService.isCinemaAdmin) {
       return AdminService.adminCinema;
     }
@@ -69,12 +75,40 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
   void initState() {
     super.initState();
     _selectedCinema = _availableCinemas.first;
-    print('DEBUG SeatManager init: widget.restrictedCinema=${widget.restrictedCinema}');
-    print('DEBUG SeatManager init: _cinemaName=$_cinemaName');
-    print('DEBUG SeatManager init: _isCinemaAdmin=$_isCinemaAdmin');
-    print('DEBUG SeatManager init: _selectedCinema=$_selectedCinema');
+    
     _initSeats();
     _loadSeatBookings();
+    _initAnimations();
+  }
+
+  void _initAnimations() {
+    // Screen glow pulse
+    _screenGlowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat(reverse: true);
+    _screenGlowAnim = Tween<double>(begin: 0.7, end: 1.0).animate(
+      CurvedAnimation(parent: _screenGlowController, curve: Curves.easeInOut),
+    );
+
+    // Legend fade in
+    _legendController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _legendFadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _legendController, curve: Curves.easeOut),
+    );
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) _legendController.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _screenGlowController.dispose();
+    _legendController.dispose();
+    super.dispose();
   }
 
   void _initSeats() {
@@ -89,14 +123,10 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
     try {
       final dateStr = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
       
-      print('Loading seats for: $_selectedCinema | $_selectedShowTime | $dateStr');
-
       final snapshot = await FirebaseFirestore.instance
-        .collection('seatBookings')
-        .where('cinemaName', isEqualTo: _selectedCinema)
-        .get();
-
-      print('Found ${snapshot.docs.length} total bookings for $_selectedCinema');
+          .collection('seatBookings')
+          .where('cinemaName', isEqualTo: _selectedCinema)
+          .get();
 
       setState(() {
         _seatBookings = {};
@@ -121,20 +151,21 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
           if (col >= 9) actualCol += 2;
           
           if (row >= 0 && row < 10 && actualCol >= 0 && actualCol < 20) {
-            if (status == 'booked') _seats[row][actualCol] = 2;
-            else if (status == 'blocked') _seats[row][actualCol] = 4;
+            if (status == 'booked') {
+              _seats[row][actualCol] = 2;
+            } else if (status == 'blocked') {
+              _seats[row][actualCol] = 4;
+            }
           }
         }
         _isLoading = false;
       });
     } catch (e) {
-      print('ERROR loading seats: $e');
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error: $e'),
+          content: Text('Error loading bookings: $e'),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
         ),
       );
     }
@@ -162,25 +193,26 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
     
     try {
       await FirebaseFirestore.instance
-        .collection('seatBookings')
-        .doc('${_selectedCinema}_${_selectedShowTime}_$seatId')
-        .set({
-          'seatId': seatId,
-          'cinemaName': _selectedCinema,
-          'showTime': _selectedShowTime,
-          'date': dateStr,
-          'status': 'blocked',
-          'blockedBy': AdminService.adminEmail ?? 'unknown',
-          'blockedAt': FieldValue.serverTimestamp(),
-        });
+          .collection('seatBookings')
+          .doc('${_selectedCinema}_${_selectedShowTime}_$seatId')
+          .set({
+            'seatId': seatId,
+            'cinemaName': _selectedCinema,
+            'showTime': _selectedShowTime,
+            'date': dateStr,
+            'status': 'blocked',
+            'blockedBy': AdminService.adminEmail ?? 'unknown',
+            'blockedAt': FieldValue.serverTimestamp(),
+          });
 
       setState(() => _seats[row][col] = 4);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Seat $seatId blocked')),
+        SnackBar(content: Text('Seat $seatId blocked successfully')),
       );
+      _loadSeatBookings();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text('Error blocking seat: $e')),
       );
     }
   }
@@ -188,9 +220,9 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
   Future<void> _unblockSeat(String seatId, int row, int col) async {
     try {
       await FirebaseFirestore.instance
-        .collection('seatBookings')
-        .doc('${_selectedCinema}_${_selectedShowTime}_$seatId')
-        .delete();
+          .collection('seatBookings')
+          .doc('${_selectedCinema}_${_selectedShowTime}_$seatId')
+          .delete();
 
       setState(() {
         _seats[row][col] = 1;
@@ -198,11 +230,12 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
       });
       
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Seat $seatId unblocked')),
+        SnackBar(content: Text('Seat $seatId unblocked successfully')),
       );
+      _loadSeatBookings();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text('Error unblocking seat: $e')),
       );
     }
   }
@@ -211,18 +244,38 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('Cancel Booking', style: TextStyle(color: Colors.white)),
-        content: Text('Cancel booking $bookingId?', style: const TextStyle(color: Colors.grey)),
+        backgroundColor: const Color(0xFF12141D),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withOpacity(0.08)),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFE50914)),
+            SizedBox(width: 8),
+            Text(
+              'Cancel Booking',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to cancel the booking $bookingId for seat $seatId?',
+          style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13, height: 1.4),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('No', style: TextStyle(color: Colors.grey)),
+            child: Text('No', style: TextStyle(color: Colors.white.withOpacity(0.5), fontWeight: FontWeight.w600)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Yes', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE50914),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            ),
+            child: const Text('Yes, Cancel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -234,9 +287,9 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
       final batch = FirebaseFirestore.instance.batch();
       
       final seatDocs = await FirebaseFirestore.instance
-        .collection('seatBookings')
-        .where('bookingId', isEqualTo: bookingId)
-        .get();
+          .collection('seatBookings')
+          .where('bookingId', isEqualTo: bookingId)
+          .get();
         
       for (final doc in seatDocs.docs) {
         batch.update(doc.reference, {
@@ -254,13 +307,13 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
       await batch.commit();
       
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Booking $bookingId cancelled')),
+        SnackBar(content: Text('Booking $bookingId cancelled successfully')),
       );
       
       _loadSeatBookings();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text('Error cancelling booking: $e')),
       );
     }
   }
@@ -271,397 +324,241 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
     
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Seat $seatId',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF12141D),
+              Color(0xFF0E1018),
+            ],
+          ),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(
+            top: BorderSide(
+              color: Colors.white.withOpacity(0.06),
+              width: 1,
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 30,
+              offset: const Offset(0, -10),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle bar
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
                 ),
-              ),
-              Text(
-                'Status: ${status.toUpperCase()}',
-                style: TextStyle(
-                  color: status == 'booked' 
-                    ? Colors.yellow 
-                    : status == 'blocked' 
-                      ? Colors.red 
-                      : Colors.green,
-                  fontSize: 14,
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Text(
+                      'Seat $seatId',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _buildStatusBadge(status),
+                  ],
                 ),
-              ),
-              if (booking != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Movie: ${booking['movieName'] ?? 'N/A'}',
-                  style: const TextStyle(color: Colors.grey, fontSize: 12),
-                ),
-                Text(
-                  'Booking: ${booking['bookingId'] ?? 'N/A'}',
-                  style: const TextStyle(color: Colors.grey, fontSize: 12),
-                ),
-              ],
-              const SizedBox(height: 20),
-              
-              if (status == 'available' || status == 'cancelled')
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
+                if (booking != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.02),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.04)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _infoRow(Icons.movie_rounded, 'Movie', booking['movieName'] ?? 'N/A'),
+                        const SizedBox(height: 8),
+                        _infoRow(Icons.receipt_rounded, 'Booking ID', booking['bookingId'] ?? 'N/A'),
+                        if (booking['blockedBy'] != null) ...[
+                          const SizedBox(height: 8),
+                          _infoRow(Icons.admin_panel_settings_rounded, 'Blocked By', booking['blockedBy']),
+                        ]
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                
+                if (status == 'available' || status == 'cancelled')
+                  _buildActionButton(
+                    label: 'Block Seat',
+                    icon: Icons.block,
+                    color: const Color(0xFFE50914),
+                    onTap: () {
                       Navigator.pop(context);
                       _blockSeat(seatId, row, col);
                     },
-                    icon: const Icon(Icons.block, size: 18),
-                    label: const Text('Block Seat', style: TextStyle(fontSize: 14)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF8B0000),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
                   ),
-                ),
-              
-              if (status == 'blocked')
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
+                
+                if (status == 'blocked')
+                  _buildActionButton(
+                    label: 'Unblock Seat',
+                    icon: Icons.lock_open_rounded,
+                    color: Colors.green,
+                    onTap: () {
                       Navigator.pop(context);
                       _unblockSeat(seatId, row, col);
                     },
-                    icon: const Icon(Icons.lock_open, size: 18),
-                    label: const Text('Unblock Seat', style: TextStyle(fontSize: 14)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
                   ),
-                ),
-              
-              if (status == 'booked')
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
+                
+                if (status == 'booked')
+                  _buildActionButton(
+                    label: 'Cancel Booking',
+                    icon: Icons.cancel_presentation_rounded,
+                    color: Colors.orange,
+                    onTap: () {
                       Navigator.pop(context);
                       _cancelBooking(seatId, booking['bookingId']);
                     },
-                    icon: const Icon(Icons.cancel, size: 18),
-                    label: const Text('Cancel Booking', style: TextStyle(fontSize: 14)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(
+                      'Close',
+                      style: TextStyle(color: Colors.white.withOpacity(0.5), fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
-              
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _color(int s) => [
-    Colors.transparent,
-    Color(0xFF6B6565),
-    Color(0xFFD4AF37),
-    Color(0xFFC41E3A),
-    Color(0xFF8B0000),
-  ][s];
-
-  @override
-  Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final sp = w / 375;
-
-    // CRITICAL FIX: Use _isCinemaAdmin getter which checks BOTH widget and AdminService
-    final isCinemaAdmin = _isCinemaAdmin;
-    final cinemaName = _cinemaName;
-
-    print('DEBUG SeatManager build: widget.restrictedCinema=${widget.restrictedCinema}');
-    print('DEBUG SeatManager build: _cinemaName=$cinemaName');
-    print('DEBUG SeatManager build: _isCinemaAdmin=$isCinemaAdmin');
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F),
-      appBar: AppBar(
-        title: Text(
-          isCinemaAdmin && cinemaName != null
-            ? '$cinemaName - Seats' 
-            : 'Manage Seats',
-          style: const TextStyle(color: Colors.white),
-        ),
-        backgroundColor: const Color(0xFF0F0F0F),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadSeatBookings,
-          ),
-        ],
-      ),
-      body: _isLoading
-        ? const Center(child: CircularProgressIndicator(color: Color(0xFFE50914)))
-        : Column(
-            children: [
-              // Date picker
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16 * sp, vertical: 8 * sp),
-                child: GestureDetector(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _selectedDate,
-                      firstDate: DateTime.now().subtract(const Duration(days: 30)),
-                      lastDate: DateTime.now().add(const Duration(days: 30)),
-                      builder: (_, child) => Theme(
-                        data: ThemeData.dark().copyWith(
-                          colorScheme: const ColorScheme.dark(
-                            primary: Color(0xFFE50914),
-                            onPrimary: Colors.white,
-                            surface: Color(0xFF1E1E1E),
-                          ),
-                        ),
-                        child: child!,
-                      ),
-                    );
-                    if (picked != null) {
-                      setState(() => _selectedDate = picked);
-                      _loadSeatBookings();
-                    }
-                  },
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 14 * sp, vertical: 10 * sp),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFE50914).withOpacity(0.5)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.calendar_today, color: Color(0xFFE50914), size: 18),
-                        SizedBox(width: 8 * sp),
-                        Text(
-                          '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
-                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                        ),
-                        const Spacer(),
-                        const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              
-              // CRITICAL FIX: Cinema selector ONLY for super admin
-              // Use the local isCinemaAdmin variable, NOT widget.restrictedCinema directly
-              if (!isCinemaAdmin)
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16 * sp),
-                  child: _filterDropdown(
-                    'Cinema',
-                    _selectedCinema,
-                    _availableCinemas,
-                    (v) => setState(() => _selectedCinema = v),
-                  ),
-                ),
-              
-              // Show time selector
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16 * sp),
-                child: _filterDropdown(
-                  'Show Time',
-                  _selectedShowTime,
-                  ['06:00 AM', '10:30 AM', '02:30 PM', '06:30 PM', '10:30 PM'],
-                  (v) => setState(() => _selectedShowTime = v),
-                ),
-              ),
-              
-              // Stats
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16 * sp),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _statCard('Available', _countSeats(1), Colors.grey),
-                    _statCard('Booked', _countSeats(2), Colors.yellow),
-                    _statCard('Blocked', _countSeats(4), Colors.red),
-                  ],
-                ),
-              ),
-              
-              SizedBox(height: 20 * sp),
-              
-              // Seat Grid
-              Expanded(
-                child: InteractiveViewer(
-                  constrained: false,
-                  minScale: 0.3,
-                  maxScale: 5,
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(width: 30),
-                              ...List.generate(_seats[0].length, (c) {
-                                if (_seats[0][c] == 0) {
-                                  return Container(width: 22, margin: const EdgeInsets.symmetric(horizontal: 3));
-                                }
-                                int seatNum = 0;
-                                for (int i = 0; i <= c; i++) {
-                                  if (_seats[0][i] != 0) seatNum++;
-                                }
-                                return Container(
-                                  width: 22,
-                                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    seatNum.toString(),
-                                    style: const TextStyle(color: Colors.white54, fontSize: 10),
-                                  ),
-                                );
-                              }),
-                            ],
-                          ),
-                        ),
-                        ...List.generate(
-                          _seats.length,
-                          (r) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SizedBox(
-                                  width: 30,
-                                  child: Text(
-                                    String.fromCharCode(65 + r),
-                                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                                  ),
-                                ),
-                                ...List.generate(_seats[r].length, (c) {
-                                  final s = _seats[r][c];
-                                  final seatName = '${String.fromCharCode(65 + r)}${c < 9 ? c + 1 : c - 1}';
-                                  return GestureDetector(
-                                    onTap: s == 0 ? null : () => _showSeatActions(seatName, r, c),
-                                    child: Container(
-                                      width: 22,
-                                      height: 22,
-                                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                                      decoration: BoxDecoration(
-                                        color: _color(s),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              
-              // Legend
-              Padding(
-                padding: EdgeInsets.all(16 * sp),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _legend(Color(0xFF6B6565), "Available"),
-                    const SizedBox(width: 20),
-                    _legend(Color(0xFFD4AF37), "Booked"),
-                    const SizedBox(width: 20),
-                    _legend(Color(0xFF8B0000), "Blocked"),
-                  ],
-                ),
-              ),
-            ],
-          ),
-    );
-  }
-
-  Widget _filterDropdown(String label, String value, List<String> items, Function(String) onChanged) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.withOpacity(0.3)),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: value,
-              dropdownColor: const Color(0xFF1E1E1E),
-              style: const TextStyle(color: Colors.white),
-              isExpanded: true,
-              items: items.map((item) => DropdownMenuItem(
-                value: item,
-                child: Text(item, style: const TextStyle(fontSize: 13)),
-              )).toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  onChanged(v);
-                  _loadSeatBookings();
-                }
-              },
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String status) {
+    Color color;
+    switch (status) {
+      case 'booked':
+        color = const Color(0xFFD4AF37);
+        break;
+      case 'blocked':
+        color = const Color(0xFFE50914);
+        break;
+      default:
+        color = Colors.green;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        status.toUpperCase(),
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, color: Colors.white.withOpacity(0.3), size: 14),
+        const SizedBox(width: 8),
+        Text(
+          '$label: ',
+          style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12, fontWeight: FontWeight.w500),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
     );
   }
 
-  Widget _statCard(String label, int count, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Text(
-            count.toString(),
-            style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold),
+  Widget _buildActionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [color, color.withOpacity(0.8)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.25),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-        ],
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -676,18 +573,492 @@ class _AdminSeatManagementState extends State<AdminSeatManagement> {
     return count;
   }
 
-  Widget _legend(Color c, String t) => Row(
-    children: [
-      Container(
-        width: 16,
-        height: 16,
-        decoration: BoxDecoration(
-          color: c,
-          borderRadius: BorderRadius.circular(4),
+  Future<void> _selectDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+      builder: (_, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: Color(0xFFE50914),
+            onPrimary: Colors.white,
+            surface: Color(0xFF12141D),
+            onSurface: Colors.white,
+          ),
+          dialogBackgroundColor: const Color(0xFF12141D),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+      _loadSeatBookings();
+    }
+  }
+
+  String _getSeatName(int rowIndex, int colIndex) {
+    final rowLabel = String.fromCharCode(65 + rowIndex);
+    int seatNum = 0;
+    for (int i = 0; i <= colIndex; i++) {
+      if (_seats[0][i] != 0) seatNum++;
+    }
+    return '$rowLabel$seatNum';
+  }
+
+  Widget _buildShowTimeDropdown() {
+    return _customDropdown(
+      icon: Icons.access_time_rounded,
+      value: _selectedShowTime,
+      items: const ['06:00 AM', '10:30 AM', '02:30 PM', '06:30 PM', '10:30 PM'],
+      onChanged: (v) => setState(() => _selectedShowTime = v),
+    );
+  }
+
+  Widget _buildCinemaDropdown() {
+    return _customDropdown(
+      icon: Icons.movie_filter_rounded,
+      value: _selectedCinema,
+      items: _availableCinemas,
+      onChanged: (v) => setState(() => _selectedCinema = v),
+    );
+  }
+
+  Widget _customDropdown({
+    required IconData icon,
+    required String value,
+    required List<String> items,
+    required Function(String) onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFFE50914), size: 14),
+          const SizedBox(width: 6),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: value,
+                dropdownColor: const Color(0xFF12141D),
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                icon: Icon(Icons.arrow_drop_down, color: Colors.white.withOpacity(0.3), size: 16),
+                isExpanded: true,
+                items: items.map((item) => DropdownMenuItem(
+                  value: item,
+                  child: Text(item),
+                )).toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    onChanged(v);
+                    _loadSeatBookings();
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statCard(String label, int count, Color bgColor, Color borderColor, Color textColor, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor.withOpacity(0.4), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: bgColor.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: borderColor.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: textColor, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  count.toString(),
+                  style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                ),
+                Text(
+                  label,
+                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCinemaScreen() {
+    return ListenableBuilder(
+      listenable: _screenGlowAnim,
+      builder: (context, child) {
+        return SizedBox(
+          width: double.infinity,
+          height: 70,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 30),
+            child: CustomPaint(
+              painter: CinemaScreenPainter(
+                glowIntensity: _screenGlowAnim.value,
+              ),
+              size: Size.infinite,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSeatGrid() {
+    return InteractiveViewer(
+      constrained: false,
+      minScale: 0.3,
+      maxScale: 5,
+      boundaryMargin: const EdgeInsets.all(80),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Column numbers
+              _buildColumnNumbers(),
+              const SizedBox(height: 6),
+              // Seat rows
+              ...List.generate(_seats.length, (r) => _buildSeatRow(r)),
+            ],
+          ),
         ),
       ),
-      const SizedBox(width: 6),
-      Text(t, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-    ],
-  );
+    );
+  }
+
+  Widget _buildColumnNumbers() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(width: 32), // Space for row label
+        ...List.generate(_seats[0].length, (c) {
+          if (_seats[0][c] == 0) {
+            return const SizedBox(width: 30);
+          }
+          int seatNum = 0;
+          for (int i = 0; i <= c; i++) {
+            if (_seats[0][i] != 0) seatNum++;
+          }
+          return SizedBox(
+            width: 30,
+            child: Center(
+              child: Text(
+                seatNum.toString(),
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.2),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildSeatRow(int rowIndex) {
+    final rowLabel = String.fromCharCode(65 + rowIndex);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Row label
+          SizedBox(
+            width: 32,
+            child: Center(
+              child: Text(
+                rowLabel,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.25),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+          ),
+          // Seats
+          ...List.generate(_seats[rowIndex].length, (c) {
+            final s = _seats[rowIndex][c];
+            final seatName = _getSeatName(rowIndex, c);
+            
+            return AnimatedSeatWidget(
+              seatState: s,
+              onTap: s == 0 ? () {} : () => _showSeatActions(seatName, rowIndex, c),
+              rowIndex: rowIndex,
+              colIndex: c,
+              entranceDelay: Duration(milliseconds: 40 * rowIndex + 10 * (c % 5)),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegend() {
+    return FadeTransition(
+      opacity: _legendFadeAnim,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _legendItem(const Color(0xFF1E2535), const Color(0xFF2A3548), 'Available'),
+            const SizedBox(width: 16),
+            _legendItem(const Color(0xFFD4AF37), const Color(0xFFB8941E), 'Booked'),
+            const SizedBox(width: 16),
+            _legendItem(const Color(0xFF3A1015), const Color(0xFF4A1520), 'Blocked'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _legendItem(Color fill, Color border, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: fill,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: border, width: 1),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.45),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isCinemaAdmin = _isCinemaAdmin;
+    final cinemaName = _cinemaName;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        leading: IconButton(
+          icon: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Column(
+          children: [
+            Text(
+              isCinemaAdmin && cinemaName != null
+                  ? '$cinemaName'
+                  : 'Manage Seats',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}  •  $_selectedShowTime',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.45),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.refresh, color: Colors.white, size: 18),
+            ),
+            onPressed: _loadSeatBookings,
+          ),
+        ],
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF0A0E1A),
+              Color(0xFF0A0A0F),
+              Color(0xFF080810),
+            ],
+            stops: [0.0, 0.4, 1.0],
+          ),
+        ),
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: Color(0xFFE50914)))
+            : Column(
+                children: [
+                  SizedBox(height: MediaQuery.of(context).padding.top + 56),
+                  
+                  // Top filter controls card
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.03),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.06),
+                          width: 1,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              // Date Picker button
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: _selectDate,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.04),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: Colors.white.withOpacity(0.06)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.calendar_today_rounded, color: Color(0xFFE50914), size: 14),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
+                                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                                        ),
+                                        const Spacer(),
+                                        Icon(Icons.arrow_drop_down, color: Colors.white.withOpacity(0.3), size: 16),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Show Time selector
+                              Expanded(
+                                child: _buildShowTimeDropdown(),
+                              ),
+                            ],
+                          ),
+                          if (!isCinemaAdmin) ...[
+                            const SizedBox(height: 8),
+                            // Cinema selector for super admin
+                            _buildCinemaDropdown(),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Stats
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(child: _statCard('Available', _countSeats(1), const Color(0xFF1E2535), const Color(0xFF2A3548), Colors.white70, Icons.event_seat_rounded)),
+                        const SizedBox(width: 8),
+                        Expanded(child: _statCard('Booked', _countSeats(2), const Color(0xFFD4AF37), const Color(0xFFD4AF37), const Color(0xFFD4AF37), Icons.airplane_ticket_rounded)),
+                        const SizedBox(width: 8),
+                        Expanded(child: _statCard('Blocked', _countSeats(4), const Color(0xFFE50914), const Color(0xFFE50914), const Color(0xFFFF2D3A), Icons.block_flipped)),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+                  
+                  // Cinema screen curve
+                  _buildCinemaScreen(),
+                  const SizedBox(height: 4),
+                  
+                  // "SCREEN" label
+                  Center(
+                    child: Text(
+                      'SCREEN',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.25),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 6,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Seat grid
+                  Expanded(child: _buildSeatGrid()),
+                  
+                  // Legend
+                  _buildLegend(),
+                  const SizedBox(height: 16),
+                ],
+              ),
+      ),
+    );
+  }
 }

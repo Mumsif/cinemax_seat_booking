@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cinemax_seat_booking/core/services/tmdb_service.dart';
 import 'package:cinemax_seat_booking/presentation/views/movie_detail_screen.dart';
 

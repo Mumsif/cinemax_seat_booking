@@ -28,6 +28,9 @@ dependencies:
   mobile_scanner: ^3.5.0
   shared_preferences: ^2.3.2
 
+  # ─── SECURITY (HMAC for QR tickets) ───
+  crypto: ^3.0.3
+
   # ─── STATE MANAGEMENT ───
   flutter_riverpod: ^2.6.0
 

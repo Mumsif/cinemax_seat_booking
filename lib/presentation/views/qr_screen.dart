@@ -11,6 +11,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cinemax_seat_booking/core/services/notification_service.dart';
+import 'package:cinemax_seat_booking/core/utils/ticket_signer.dart';
 
 class QRScreen extends StatefulWidget {
   final String movieName;
@@ -87,19 +88,12 @@ class _QRTicketScreenState extends State<QRScreen>
   }
 
   String get _qrData {
+    // Generate booking ID only as fallback (should normally be provided by caller)
     final bookingId = widget.bookingId ?? 'BK-${DateTime.now().millisecondsSinceEpoch}';
-    const String secretPrefix = 'CINEMAX_ADMIN';
-    final buffer = StringBuffer();
-    buffer.writeln('$secretPrefix:$bookingId');
-    buffer.writeln('Booking ID: $bookingId');
-    buffer.writeln('Movie: ${widget.movieName}');
-    buffer.writeln('Cinema: ${widget.cinemaName}');
-    buffer.writeln('Date: $_formattedDate');
-    buffer.writeln('Time: ${widget.showTime}');
-    buffer.writeln('Seats: ${widget.selectedSeats.join(', ')}');
-    buffer.writeln('Tickets: ${widget.selectedSeats.length}');
-    buffer.writeln('Status: CONFIRMED');
-    return buffer.toString().trim();
+    final signature = TicketSigner.sign(bookingId);
+    // Only the signed token is encoded in the QR (no human readable details).
+    // Details are fetched server-side (Firestore) after successful verification.
+    return 'CINEMAX_ADMIN:$bookingId.$signature';
   }
 
   Future<void> _cancelBooking() async {
@@ -444,18 +438,9 @@ class _QRTicketScreenState extends State<QRScreen>
                             ),
                           ),
                         ),
-                        SizedBox(height: 12 * sp),
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 12 * sp, vertical: 6 * sp),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2A2A2A),
-                            borderRadius: BorderRadius.circular(6 * sp),
-                          ),
-                          child: Text(
-                            'ID: ${widget.bookingId ?? 'PENDING'}',
-                            style: TextStyle(color: const Color(0xFFD0B781), fontSize: 11 * sp, fontFamily: 'monospace'),
-                          ),
-                        ),
+                        // No plain-text Booking ID is shown below the QR (removed to prevent leakage).
+                        // The QR encodes *only* the secure token `CINEMAX_ADMIN:$bookingId.$signature`.
+                        // Human-readable details (incl. any booking reference) come from Firestore after signature verification.
                       ],
                     ),
                   ),

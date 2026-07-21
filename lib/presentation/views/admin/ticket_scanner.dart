@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cinemax_seat_booking/core/utils/ticket_signer.dart';
 
 class TicketScanner extends StatefulWidget {
   const TicketScanner({super.key});
@@ -52,7 +53,6 @@ class _TicketScannerState extends State<TicketScanner>
   Future<void> _processQR(String qrData) async {
     if (_isProcessing || !_isScanning) return;
 
-    // Validate QR starts with secret prefix
     const String secretPrefix = 'CINEMAX_ADMIN';
 
     if (!qrData.startsWith('$secretPrefix:')) {
@@ -71,21 +71,25 @@ class _TicketScannerState extends State<TicketScanner>
     });
 
     try {
-      // Extract booking ID after prefix
-      // Format: "CINEMAX_ADMIN:BK-1779249918181\nBooking ID:..."
-      String bookingId;
+      // New secure format (post HMAC signing):
+      //   CINEMAX_ADMIN:$bookingId.$signature
+      // No human-readable details are embedded; they are looked up from Firestore
+      // only after signature verification succeeds.
+      final afterPrefix = qrData.substring('$secretPrefix:'.length).trim();
 
-      // Get the line after prefix
-      final lines = qrData.split('\n');
-      if (lines.isNotEmpty && lines[0].startsWith('$secretPrefix:')) {
-        bookingId = lines[0].substring('$secretPrefix:'.length);
-      } else if (qrData.contains('BK-')) {
-        // Fallback - find BK- pattern
-        final match = RegExp(r'BK-\d+').firstMatch(qrData);
-        bookingId = match?.group(0) ?? '';
-      } else {
-        bookingId = '';
+      final dotIndex = afterPrefix.indexOf('.');
+      if (dotIndex == -1 || dotIndex == 0 || dotIndex == afterPrefix.length - 1) {
+        setState(() {
+          _errorMessage = 'Invalid QR format - missing signature';
+          _showResult = true;
+          _isProcessing = false;
+        });
+        _animationController.forward();
+        return;
       }
+
+      final bookingId = afterPrefix.substring(0, dotIndex);
+      final signature = afterPrefix.substring(dotIndex + 1);
 
       if (bookingId.isEmpty) {
         setState(() {
@@ -97,9 +101,21 @@ class _TicketScannerState extends State<TicketScanner>
         return;
       }
 
+      // CRITICAL: Verify HMAC-SHA256 signature BEFORE any Firestore access.
+      // Recompute signature from bookingId using same secret; reject immediately on mismatch.
+      if (!TicketSigner.verify(bookingId, signature)) {
+        setState(() {
+          _errorMessage = 'Invalid ticket signature - possible forgery. Access denied.';
+          _showResult = true;
+          _isProcessing = false;
+        });
+        _animationController.forward();
+        return;
+      }
+
       _scannedBookingId = bookingId;
 
-      // Fetch ticket from Firestore
+      // Signature OK — safe to proceed to Firestore lookup
       final doc = await FirebaseFirestore.instance
           .collection('tickets')
           .doc(bookingId)
